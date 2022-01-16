@@ -1,11 +1,11 @@
 import logging
 import ipaddress
 from multiprocessing import cpu_count
+from log.logging import logger
 
 from errors import ConfigError
 
 
-logger = logging.getLogger(__name__)
 CPU_COUNT = cpu_count()
 MEM_SIZE = 100 * 1024 * 1024
 
@@ -72,3 +72,7 @@ class Config:
                 of worker processes({}) can affect performance'.format(worker_cnt))
         
         self._num_worker = worker_cnt
+    
+    @property
+    def log(self):
+        return logger
