@@ -1,6 +1,7 @@
 import socket
 import errno
 
+
 class Socket:
     def __init__(self, addr, conf, bound=False, family=socket.AF_INET, sock_type=socket.SOCK_STREAM) -> None:
         sock = socket.socket(family, sock_type)
