@@ -1,3 +1,4 @@
+import errno
 import os
 import signal
 from sock import Socket
@@ -12,7 +13,7 @@ class MasterP:
     def sigint_handler(self, sig_num, frame):
         master_id = os.getpid()
         self.log.info('[{}] Master: Closing connection'.format(master_id))
-        self.log.info('[{}] Shutting down workers'.format(os.getpid()))
+        # self.log.info('[{}] Shutting down workers'.format(os.getpid()))
         os._exit(1)
 
     def sigint_c_handler(self, sig_num, frame):
@@ -20,19 +21,6 @@ class MasterP:
         os._exit(1)
     
     def sigchild_handler(self, sig_num, frame):
-        pid = self.wait()
-        if pid >= 0:
-            pass
-
-    def init_signals(self):
-        signal.signal(signal.SIGINT, self.sigint_handler)
-        signal.signal(signal.SIGCHLD, self.sigchild_handler)
-
-    def kill_workers(self):
-        for pid, worker in self.WORKERS.items():
-            worker.kill()
-
-    def wait(self):
         try:
             pid, status = os.waitpid(-1, os.WUNTRACED | os.WCONTINUED)
         except OSError as e:
@@ -52,6 +40,14 @@ class MasterP:
         else:
             pass
         return pid
+
+    def init_signals(self):
+        signal.signal(signal.SIGINT, self.sigint_handler)
+        signal.signal(signal.SIGCHLD, self.sigchild_handler)
+
+    def kill_workers(self):
+        for pid, worker in self.WORKERS.items():
+            worker.kill()
     
     def start(self):
         sock = Socket(self.cfg.addr, self.cfg)
@@ -61,32 +57,39 @@ class MasterP:
             if pid == -1:
                 self.log.error('Fork Error!')
                 return
+
             if pid != 0:
                 continue
+
+            p_id = os.getpid()
             signal.signal(signal.SIGINT, self.sigint_c_handler)
             sock.sock.listen()
+            self.log.info('Waiting for connection...')
             while True:
-                p_id = os.getpid()
-
-                self.log.info('Waiting for connection...')
-
                 try:
                     conn, addr = sock.sock.accept()
-                except BlockingIOError:
+                except OSError as e:
+                    if e.errno not in [errno.EWOULDBLOCK, errno.EAGAIN]:
+                        raise
                     continue
-                
-                self.log.info('Accepted connection: {} from {}'.format(addr, p_id))
+
+                self.log.debug('Accepted connection: {} from {}'.format(addr, p_id))
 
                 n = conn.send(b'\r\nContent-Type: text/plain; Hello World')
                 if n != len('\r\nContent-Type: text/plain; Hello World'):
-                    self.log.info('Unable to send data')
+                    self.log.debug('Unable to send data')
                     raise Exception('Something bad has happened')
-                self.log.info('Message sent')
+                self.log.debug('Message sent')
                 # req = conn.recv(1024)
                 # self.log.debug('[{}] Found: {}'.format(p_id, req))
     
-    # def ensure_workers(self):
-        # for 
+    def ensure_workers(self):
+        num_workers = len(self.WORKERS)
+
+        if num_workers < self.cfg.num_workers:
+            pass
+        elif num_workers > self.cfg.num_workers:
+            pass
     
     def run(self):
         self.start()
