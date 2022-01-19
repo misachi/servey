@@ -10,11 +10,12 @@ MEM_SIZE = 100 * 1024 * 1024
 
 
 class Config:
-    def __init__(self, addr, ncpus=None, nworker=None, mem_sz=None):
+    def __init__(self, addr, ncpus=None, nworker=None, mem_sz=None, wqueue=5):
         self.addr = addr
         self.num_cpu = ncpus
         self.mem_limit = mem_sz
         self.num_worker = nworker
+        self.queue = wqueue
     
     @property
     def addr(self):

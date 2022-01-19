@@ -1,25 +1,23 @@
-import errno
 import os
+import sys
 import signal
 from sock import Socket
 from signals import sigs
+
+from worker import Worker
+
 
 class MasterP:
     WORKERS = {}
     def __init__(self, config) -> None:
         self.cfg = config
         self.log = self.cfg.log
+        self.master_id = os.getpid()
     
     def sigint_handler(self, sig_num, frame):
-        master_id = os.getpid()
-        self.log.info('[{}] Master: Closing connection'.format(master_id))
-        # self.log.info('[{}] Shutting down workers'.format(os.getpid()))
+        self.log.info('[{}] Master: Closing connection'.format(self.master_id))
         os._exit(1)
 
-    def sigint_c_handler(self, sig_num, frame):
-        self.log.info('[{}] is shutting down'.format(os.getpid()))
-        os._exit(1)
-    
     def sigchild_handler(self, sig_num, frame):
         try:
             pid, status = os.waitpid(-1, os.WUNTRACED | os.WCONTINUED)
@@ -37,67 +35,55 @@ class MasterP:
         elif os.WIFSIGNALED(status):
             self.log.debug('[{}] received {} signal\n'.format(pid, sigs[os.WTERMSIG(status)]))
             self.WORKERS.pop(pid, None)
-        else:
-            pass
-        return pid
 
     def init_signals(self):
         signal.signal(signal.SIGINT, self.sigint_handler)
         signal.signal(signal.SIGCHLD, self.sigchild_handler)
 
     def kill_workers(self):
-        for pid, worker in self.WORKERS.items():
-            worker.kill()
-    
-    def start(self):
+        for pid, _ in self.WORKERS.items():
+            os.kill(pid, signal.SIGTERM)
+
+    def new_children(self, num_workers):
         sock = Socket(self.cfg.addr, self.cfg)
-        self.init_signals()
-        for _ in range(self.cfg.num_worker):
+        for _ in range(num_workers):
+            worker = Worker(sock.sock, os.getpid(), self.cfg)
             pid = os.fork()
             if pid == -1:
                 self.log.error('Fork Error!')
                 return
 
             if pid != 0:
+                self.WORKERS[pid] = worker
                 continue
 
-            p_id = os.getpid()
-            signal.signal(signal.SIGINT, self.sigint_c_handler)
-            sock.sock.listen()
-            self.log.info('Waiting for connection...')
-            while True:
-                try:
-                    conn, addr = sock.sock.accept()
-                except OSError as e:
-                    if e.errno not in [errno.EWOULDBLOCK, errno.EAGAIN]:
-                        raise
-                    continue
+            worker.run()
+    
+    def start(self):
+        self.init_signals()
+        self.new_children(self.cfg.num_worker)
 
-                self.log.debug('Accepted connection: {} from {}'.format(addr, p_id))
-
-                n = conn.send(b'\r\nContent-Type: text/plain; Hello World')
-                if n != len('\r\nContent-Type: text/plain; Hello World'):
-                    self.log.debug('Unable to send data')
-                    raise Exception('Something bad has happened')
-                self.log.debug('Message sent')
-                # req = conn.recv(1024)
-                # self.log.debug('[{}] Found: {}'.format(p_id, req))
+        sys.stdout.write('[{}] Master is starting\n'.format(self.master_id))
+        sys.stdout.write('starting worker processes\n')
+        sys.stdout.flush()
     
     def ensure_workers(self):
         num_workers = len(self.WORKERS)
 
-        if num_workers < self.cfg.num_workers:
-            pass
-        elif num_workers > self.cfg.num_workers:
-            pass
-    
+        if num_workers < self.cfg.num_worker:
+            self.new_children(self.cfg.num_worker - num_workers)
+        elif num_workers > self.cfg.num_worker:
+            if self.WORKERS:
+                worker_pids = list(self.WORKERS.keys())
+                for _ in range(num_workers - self.cfg.num_worker):
+                    pid = worker_pids.pop()
+                    os.kill(pid, signal.SIGTERM)
+                    self.WORKERS.pop(pid, None)
+
     def run(self):
         self.start()
         while True:
-            pass
-    
-    def start_worker(self):
-        pass
+            self.ensure_workers()
 
 
 if __name__ == '__main__':
