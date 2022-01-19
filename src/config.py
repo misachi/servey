@@ -1,4 +1,3 @@
-import logging
 import ipaddress
 from multiprocessing import cpu_count
 from log.logging import logger
@@ -14,24 +13,24 @@ class Config:
     def __init__(self, addr, ncpus=None, nworker=None, mem_sz=None):
         self.addr = addr
         self.num_cpu = ncpus
-
-        if mem_sz is None:
-            self.mem_limit = MEM_SIZE
+        self.mem_limit = mem_sz
         self.num_worker = nworker
     
     @property
     def addr(self):
-        return self._addr
+        _addr, port = self._addr.split(':')
+        return _addr, int(port)
     
     @addr.setter
-    def addr(self, ip_addr):
+    def addr(self, addr):
         try:
+            ip_addr = addr.split(':')[0]
             ipaddress.ip_address(ip_addr)
         except ValueError as e:
-            logger.exception('Config addr: Invalid IP address: {}'.format(ip_addr))
+            logger.exception('Config addr: Invalid IP address({}): {}'.format(ip_addr, e))
             raise ConfigError('Config addr: Invalid IP address')
         
-        self._addr = ip_addr
+        self._addr = addr
     
     @property
     def num_cpu(self):
@@ -55,7 +54,14 @@ class Config:
 
     @property
     def mem_limit(self):
-        return self.mem_limit
+        return self._mem_limit
+    
+    @mem_limit.setter
+    def mem_limit(self, mem_sz):
+        if mem_sz is None:
+            self._mem_limit = MEM_SIZE
+        else:
+            self._mem_limit = mem_sz
 
     @property
     def num_worker(self):
