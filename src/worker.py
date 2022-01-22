@@ -1,6 +1,7 @@
 import os
 import signal
 import errno
+import select
 
 
 class Worker:
@@ -28,18 +29,31 @@ class Worker:
         self.sock.listen(self.cfg.queue)
         self.log.debug('Waiting for connection...')
         self.init_signals()
+
         while True:
             try:
+                read = select.select([self.sock], [], [], 1.1)
+                if not read or (read and self.sock not in read[0]):
+                    continue
                 conn, addr = self.sock.accept()
             except OSError as e:
                 if e.errno not in [errno.EWOULDBLOCK, errno.EAGAIN]:
                     raise
                 continue
 
+            try:
+                req = conn.recv(1024)
+                self.log.info('We got: {}'.format(req))
+            except OSError:
+                pass
+            
+            # Dummy Response Header + Message
             self.log.debug('Accepted connection: {} from {}'.format(addr, self.worker_id))
-
-            n = conn.send(b'\r\nContent-Type: text/plain; Hello World')
-            if n != len('\r\nContent-Type: text/plain; Hello World'):
-                self.log.debug('Unable to send data')
-                raise Exception('Something bad has happened')
+            data = b'HTTPP/1.1 200 OK\r\n'
+            n = conn.send(data)
+            conn.send(b'Content-Type: text/html\r\n')#Content-Type: text/html\r\n\r\n<b>Hello World</b>')
+            conn.send(b'Allow: GET, POST, PUT\r\n')
+            conn.send(b'Server: Servey/0.0.1\r\n\r\n')
+            conn.send(b'Hello World')
+            conn.close()
             self.log.debug('Message sent')

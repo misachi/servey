@@ -1,4 +1,5 @@
 import os
+import time
 import sys
 import signal
 from sock import Socket
@@ -61,11 +62,10 @@ class MasterP:
     
     def start(self):
         self.init_signals()
-        self.new_children(self.cfg.num_worker)
-
         sys.stdout.write('[{}] Master is starting\n'.format(self.master_id))
         sys.stdout.write('starting worker processes\n')
         sys.stdout.flush()
+        self.new_children(self.cfg.num_worker)
     
     def ensure_workers(self):
         num_workers = len(self.WORKERS)
@@ -83,11 +83,5 @@ class MasterP:
     def run(self):
         self.start()
         while True:
+            time.sleep(0.5)
             self.ensure_workers()
-
-
-if __name__ == '__main__':
-    from config import Config
-    config = Config('127.0.0.1:8000', nworker=3)
-    serv = MasterP(config)
-    serv.run()
