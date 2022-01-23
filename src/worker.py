@@ -3,57 +3,60 @@ import signal
 import errno
 import select
 
+from _http.request import Request, RequestError
+
 
 class Worker:
     def __init__(self, sock, ppid, config) -> None:
-        self.worker_id = os.getpid()
+        self.worker_id = None
         self.parent_id = ppid
         self.cfg = config
         self.log = config.log
         self.sock = sock
     
-    def sigterm_handler(self):
-        pass
+    def sigquit_handler(self, sig_num, frame):
+        self.sock.ensure_closed()
+        os._exit(1)
 
     def sigint_handler(self, sig_num, frame):
         self.log.info('[{}] is shutting down'.format(os.getpid()))
+        self.sock.ensure_closed()
         os._exit(1)
     
+    def sigterm_handler(self, sig_num, frame):
+        self.running = False
+        os._exit(0)
+
     def init_signals(self):
         signal.signal(signal.SIGINT, self.sigint_handler)
+        signal.signal(signal.SIGQUIT, self.sigquit_handler)
+        signal.signal(signal.SIGTERM, self.sigterm_handler)
 
-    def process_request(self):
-        pass
+    def process_request(self, client_conn, client_addr):
+        data = client_conn.recv(1024)
+        try:
+            req = Request(data)
+        except RequestError as e:
+            self.log.error('{}: {}'.format(e.error_code, e.args[0]))
+            client_conn.send(bytes('HTTP/1.1 {} {}\r\n\r\n'.format(e.error_code, e.args[0]).encode('utf-8')))
+            client_conn.close()
+            return
 
     def run(self):
-        self.sock.listen(self.cfg.queue)
+        self.sock.listen()
         self.log.debug('Waiting for connection...')
+        self.worker_id = os.getpid()
         self.init_signals()
 
         while True:
             try:
-                read = select.select([self.sock], [], [], 1.1)
-                if not read or (read and self.sock not in read[0]):
+                read = select.select([self.sock.sock], [], [], 1.1)
+                if not read or (read and self.sock.sock not in read[0]):
                     continue
-                conn, addr = self.sock.accept()
+                client_conn, addr = self.sock.sock.accept()
+                self.process_request(client_conn, addr)
             except OSError as e:
                 if e.errno not in [errno.EWOULDBLOCK, errno.EAGAIN]:
                     raise
                 continue
 
-            try:
-                req = conn.recv(1024)
-                self.log.info('We got: {}'.format(req))
-            except OSError:
-                pass
-            
-            # Dummy Response Header + Message
-            self.log.debug('Accepted connection: {} from {}'.format(addr, self.worker_id))
-            data = b'HTTPP/1.1 200 OK\r\n'
-            n = conn.send(data)
-            conn.send(b'Content-Type: text/html\r\n')#Content-Type: text/html\r\n\r\n<b>Hello World</b>')
-            conn.send(b'Allow: GET, POST, PUT\r\n')
-            conn.send(b'Server: Servey/0.0.1\r\n\r\n')
-            conn.send(b'Hello World')
-            conn.close()
-            self.log.debug('Message sent')

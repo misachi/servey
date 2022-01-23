@@ -14,10 +14,13 @@ class MasterP:
         self.cfg = config
         self.log = self.cfg.log
         self.master_id = os.getpid()
+        self.sock = None
     
     def sigint_handler(self, sig_num, frame):
         self.log.info('[{}] Master: Closing connection'.format(self.master_id))
-        os._exit(1)
+        # self.kill_workers()
+        time.sleep(0.2)
+        os._exit(0)
 
     def sigchild_handler(self, sig_num, frame):
         try:
@@ -26,16 +29,17 @@ class MasterP:
             self.log.debug('Unable to wait on child: {}'.format(e))
             return -1
 
-        if os.WIFEXITED(status):
-            self.log.debug('[{}] exited with status {}\n'.format(pid, os.WEXITSTATUS(status)))
-            self.WORKERS.pop(pid, None)
-        elif os.WIFSTOPPED(status):
-            self.log.debug('[{}] received stop signal {}\n'.format(pid, os.WSTOPSIG(status)))
-        elif os.WIFCONTINUED(status):
-            self.log.debug('[{}] received stop signal {}\n'.format(pid, os.WSTOPSIG(status)))
-        elif os.WIFSIGNALED(status):
-            self.log.debug('[{}] received {} signal\n'.format(pid, sigs[os.WTERMSIG(status)]))
-            self.WORKERS.pop(pid, None)
+        if pid in self.WORKERS:
+            if os.WIFEXITED(status):
+                self.log.debug('[{}] exited with status {}\n'.format(pid, os.WEXITSTATUS(status)))
+                self.WORKERS.pop(pid, None)
+            elif os.WIFSTOPPED(status):
+                self.log.debug('[{}] received stop signal {}\n'.format(pid, os.WSTOPSIG(status)))
+            elif os.WIFCONTINUED(status):
+                self.log.debug('[{}] received continue signal {}\n'.format(pid, os.WSTOPSIG(status)))
+            elif os.WIFSIGNALED(status):
+                self.log.debug('[{}] received {} signal\n'.format(pid, sigs[os.WTERMSIG(status)]))
+                self.WORKERS.pop(pid, None)
 
     def init_signals(self):
         signal.signal(signal.SIGINT, self.sigint_handler)
@@ -46,9 +50,10 @@ class MasterP:
             os.kill(pid, signal.SIGTERM)
 
     def new_children(self, num_workers):
-        sock = Socket(self.cfg.addr, self.cfg)
+        self.sock = Socket(self.cfg.addr, self.cfg)
+
         for _ in range(num_workers):
-            worker = Worker(sock.sock, os.getpid(), self.cfg)
+            worker = Worker(self.sock, os.getpid(), self.cfg)
             pid = os.fork()
             if pid == -1:
                 self.log.error('Fork Error!')
@@ -57,15 +62,23 @@ class MasterP:
             if pid != 0:
                 self.WORKERS[pid] = worker
                 continue
-
+            
             worker.run()
-    
+
+
     def start(self):
         self.init_signals()
         sys.stdout.write('[{}] Master is starting\n'.format(self.master_id))
         sys.stdout.write('starting worker processes\n')
         sys.stdout.flush()
-        self.new_children(self.cfg.num_worker)
+
+        try:
+            self.new_children(self.cfg.num_worker)
+        except Exception:
+            pass
+
+        if self.master_id == os.getpid():
+            self.sock.ensure_closed()
     
     def ensure_workers(self):
         num_workers = len(self.WORKERS)
@@ -82,6 +95,6 @@ class MasterP:
 
     def run(self):
         self.start()
+        self.ensure_workers()
         while True:
             time.sleep(0.5)
-            self.ensure_workers()

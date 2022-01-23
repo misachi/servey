@@ -6,7 +6,7 @@ class Socket:
     def __init__(self, addr, conf, bound=False, family=socket.AF_INET, sock_type=socket.SOCK_STREAM) -> None:
         sock = socket.socket(family, sock_type)
         self.sock = self.add_options(sock)
-        self.conf = conf
+        self.cfg = conf
 
         if not bound:
             self.bind(addr)
@@ -26,10 +26,13 @@ class Socket:
     def bind(self, addr):
         self.sock.bind(addr)
     
-    def close(self):
+    def listen(self):
+        self.sock.listen(self.cfg.queue)
+    
+    def ensure_closed(self):
         if self.sock is not None:
             try:
                 self.sock.close()
             except OSError as e:
-                self.conf.log.info('Error closing empty socket\n{}'.format(e))
+                self.cfg.log.info('Error closing empty socket\n{}'.format(e))
             self.sock = None
